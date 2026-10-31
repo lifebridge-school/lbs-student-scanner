@@ -6,20 +6,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LBS Student Scanner</title>
 
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+
   <style>
     body {
       font-family: Arial, sans-serif;
       background: #f1f5f9;
       margin: 0;
-      padding: 20px;
+      padding: 18px;
       color: #1e293b;
     }
 
     .container {
       max-width: 480px;
-      margin: 30px auto;
+      margin: 20px auto;
       background: white;
-      padding: 25px;
+      padding: 22px;
       border-radius: 16px;
       box-shadow: 0 3px 15px #0001;
     }
@@ -29,27 +31,50 @@
       color: #15803d;
     }
 
-    p {
-      text-align: center;
-      line-height: 1.6;
+    label {
+      display: block;
+      margin-top: 18px;
+      font-weight: bold;
+    }
+
+    select, button {
+      width: 100%;
+      padding: 14px;
+      margin-top: 9px;
+      border-radius: 9px;
+      font-size: 16px;
+      box-sizing: border-box;
+    }
+
+    select {
+      border: 1px solid #cbd5e1;
+      background: white;
     }
 
     button {
-      width: 100%;
-      padding: 16px;
-      margin-top: 20px;
       border: none;
-      border-radius: 9px;
-      background: #15803d;
       color: white;
-      font-size: 17px;
+      background: #15803d;
       font-weight: bold;
       cursor: pointer;
     }
 
+    button:disabled {
+      opacity: .5;
+    }
+
+    .stop {
+      background: #dc2626;
+    }
+
+    #reader {
+      width: 100%;
+      margin-top: 20px;
+    }
+
     #result {
-      margin-top: 22px;
-      padding: 18px;
+      margin-top: 20px;
+      padding: 16px;
       border-radius: 10px;
       background: #f1f5f9;
       line-height: 1.8;
@@ -71,80 +96,197 @@
 
 <body>
 
-  <div class="container">
+<div class="container">
 
-    <h2>LBS Student Scanner</h2>
+  <h2> LBS Student Scanner </h2>
 
-    <p>
-      Welcome to the LBS camera test.
-      Let's check whether your device can access its camera.
-    </p>
+  <p style="text-align:center">
+    Scan a student ID card to identify the student.
+  </p>
 
-    <button id="testButton" onclick="testCamera()">
-      TEST CAMERA
-    </button>
+  <label>Scanning Location</label>
+  <select id="location">
+    <option value="Campus 1A">Campus 1A</option>
+    <option value="Campus 1B">Campus 1B</option>
+    <option value="Campus 2">Campus 2</option>
+  </select>
 
-    <div id="result">
-      Ready to test your camera.
-    </div>
+  <label>Attendance Action</label>
+  <select id="event">
+    <option value="IN">CHECK IN - Arrival</option>
+    <option value="OUT">CHECK OUT - Departure</option>
+  </select>
 
+  <button id="startButton" onclick="startScanner()">
+    START SCANNING
+  </button>
+
+  <button id="stopButton"
+          class="stop"
+          onclick="stopScanner()"
+          style="display:none">
+    STOP SCANNING
+  </button>
+
+  <div id="reader"></div>
+
+  <div id="result">
+    Ready to scan a student ID.
   </div>
 
-  <script>
-    async function testCamera() {
+  <button id="nextButton"
+          onclick="startScanner()"
+          style="display:none">
+    SCAN NEXT STUDENT
+  </button>
 
-      const button = document.getElementById("testButton");
-      const result = document.getElementById("result");
+</div>
 
-      button.disabled = true;
-      result.className = "";
-      result.textContent = "Requesting camera access...";
+<script>
 
-      let stream = null;
+  let scanner = null;
+  let scanning = false;
+  let processing = false;
 
-      try {
+  // Temporary sample student database
+  const sampleStudents = {
+    "TEST001": "Sample Student 1",
+    "TEST002": "Sample Student 2",
+    "TEST003": "Sample Student 3",
+    "TEST004": "Sample Student 4",
+    "TEST005": "Sample Student 5"
+  };
 
-        if (!navigator.mediaDevices ||
-            !navigator.mediaDevices.getUserMedia) {
-          throw new Error("Camera API is not available.");
-        }
+  function showResult(message, type) {
+    const box = document.getElementById("result");
+    box.className = type || "";
+    box.textContent = message;
+  }
 
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment" },
-          audio: false
-        });
+  async function startScanner() {
 
-        const camera = stream.getVideoTracks()[0];
+    if (scanning || processing) return;
 
-        result.className = "success";
-
-        result.textContent =
-          "SUCCESS! CAMERA IS WORKING!\n\n" +
-          "Camera: " + camera.label + "\n" +
-          "Permission: GRANTED\n" +
-          "Secure connection: " +
-          (window.isSecureContext ? "YES" : "NO") +
-          "\n\nYour device is ready for the next test.";
-
-      } catch (error) {
-
-        result.className = "error";
-
-        result.textContent =
-          "CAMERA TEST FAILED\n\n" +
-          "Error: " + error.name + "\n" +
-          "Message: " + error.message;
-
-      } finally {
-
-        if (stream) {
-          stream.getTracks().forEach(track => track.stop());
-        }
-
-        button.disabled = false;
-      }
+    if (typeof Html5Qrcode === "undefined") {
+      showResult(
+        "Scanner library failed to load. Check your internet connection.",
+        "error"
+      );
+      return;
     }
-  </script>
+
+    document.getElementById("startButton").disabled = true;
+    document.getElementById("nextButton").style.display = "none";
+
+    try {
+
+      if (!scanner) {
+        scanner = new Html5Qrcode("reader");
+      }
+
+      const cameras = await Html5Qrcode.getCameras();
+
+      if (!cameras || cameras.length === 0) {
+        throw new Error("No camera was found.");
+      }
+
+      const camera = cameras.find(c =>
+        /back|rear|environment/i.test(c.label)
+      ) || cameras[0];
+
+      await scanner.start(
+        camera.id,
+        {
+          fps: 10,
+          qrbox: { width: 230, height: 230 }
+        },
+        onScanSuccess
+      );
+
+      scanning = true;
+
+      document.getElementById("stopButton").style.display = "block";
+
+      showResult(
+        "Camera is ready!\n\nPlease scan a student QR code."
+      );
+
+    } catch (error) {
+
+      showResult(
+        "CAMERA ERROR\n\n" + error.name + "\n" + error.message,
+        "error"
+      );
+
+      document.getElementById("startButton").disabled = false;
+    }
+  }
+
+  async function onScanSuccess(decodedText) {
+
+    if (processing) return;
+
+    processing = true;
+
+    try {
+      await scanner.stop();
+    } catch (error) {}
+
+    scanning = false;
+
+    const studentID = decodedText.trim();
+    const studentName = sampleStudents[studentID];
+
+    const location = document.getElementById("location").value;
+    const event = document.getElementById("event").value;
+
+    if (studentName) {
+
+      showResult(
+        "SUCCESS! STUDENT RECOGNIZED!\n\n" +
+        "Student: " + studentName + "\n" +
+        "Student ID: " + studentID + "\n" +
+        "Action: " + event + "\n" +
+        "Location: " + location + "\n" +
+        "Time: " + new Date().toLocaleTimeString() +
+        "\n\nQR scanning is working!",
+        "success"
+      );
+
+    } else {
+
+      showResult(
+        "UNKNOWN STUDENT\n\n" +
+        "Scanned code: " + studentID +
+        "\n\nThis ID is not in our sample database.",
+        "error"
+      );
+    }
+
+    document.getElementById("stopButton").style.display = "none";
+    document.getElementById("startButton").disabled = false;
+    document.getElementById("nextButton").style.display = "block";
+
+    processing = false;
+  }
+
+  async function stopScanner() {
+
+    if (scanner && scanning) {
+      try {
+        await scanner.stop();
+      } catch (error) {}
+
+      scanning = false;
+    }
+
+    document.getElementById("stopButton").style.display = "none";
+    document.getElementById("startButton").disabled = false;
+
+    showResult("Scanning stopped. You can start again.");
+  }
+
+</script>
 
 </body>
 </html>
