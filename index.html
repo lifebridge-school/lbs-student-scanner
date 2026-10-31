@@ -1,0 +1,150 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LBS Student Scanner</title>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f1f5f9;
+      margin: 0;
+      padding: 20px;
+      color: #1e293b;
+    }
+
+    .container {
+      max-width: 480px;
+      margin: 30px auto;
+      background: white;
+      padding: 25px;
+      border-radius: 16px;
+      box-shadow: 0 3px 15px #0001;
+    }
+
+    h2 {
+      text-align: center;
+      color: #15803d;
+    }
+
+    p {
+      text-align: center;
+      line-height: 1.6;
+    }
+
+    button {
+      width: 100%;
+      padding: 16px;
+      margin-top: 20px;
+      border: none;
+      border-radius: 9px;
+      background: #15803d;
+      color: white;
+      font-size: 17px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    #result {
+      margin-top: 22px;
+      padding: 18px;
+      border-radius: 10px;
+      background: #f1f5f9;
+      line-height: 1.8;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .success {
+      background: #dcfce7 !important;
+      color: #166534;
+    }
+
+    .error {
+      background: #fee2e2 !important;
+      color: #991b1b;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="container">
+
+    <h2>LBS Student Scanner</h2>
+
+    <p>
+      Welcome to the LBS camera test.
+      Let's check whether your device can access its camera.
+    </p>
+
+    <button id="testButton" onclick="testCamera()">
+      TEST CAMERA
+    </button>
+
+    <div id="result">
+      Ready to test your camera.
+    </div>
+
+  </div>
+
+  <script>
+    async function testCamera() {
+
+      const button = document.getElementById("testButton");
+      const result = document.getElementById("result");
+
+      button.disabled = true;
+      result.className = "";
+      result.textContent = "Requesting camera access...";
+
+      let stream = null;
+
+      try {
+
+        if (!navigator.mediaDevices ||
+            !navigator.mediaDevices.getUserMedia) {
+          throw new Error("Camera API is not available.");
+        }
+
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment" },
+          audio: false
+        });
+
+        const camera = stream.getVideoTracks()[0];
+
+        result.className = "success";
+
+        result.textContent =
+          "SUCCESS! CAMERA IS WORKING!\n\n" +
+          "Camera: " + camera.label + "\n" +
+          "Permission: GRANTED\n" +
+          "Secure connection: " +
+          (window.isSecureContext ? "YES" : "NO") +
+          "\n\nYour device is ready for the next test.";
+
+      } catch (error) {
+
+        result.className = "error";
+
+        result.textContent =
+          "CAMERA TEST FAILED\n\n" +
+          "Error: " + error.name + "\n" +
+          "Message: " + error.message;
+
+      } finally {
+
+        if (stream) {
+          stream.getTracks().forEach(track => track.stop());
+        }
+
+        button.disabled = false;
+      }
+    }
+  </script>
+
+</body>
+</html>
