@@ -1,0 +1,135 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LBS Staff Login</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f3f7f1;
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .login-card {
+      background: white;
+      width: 90%;
+      max-width: 420px;
+      padding: 35px 25px;
+      border-radius: 16px;
+      box-shadow: 0 4px 20px #0002;
+      text-align: center;
+    }
+
+    h1 { color: #23823b; }
+    p { color: #555; }
+
+    button {
+      border: 0;
+      border-radius: 8px;
+      padding: 13px 20px;
+      margin: 8px;
+      cursor: pointer;
+      font-size: 16px;
+    }
+
+    #loginButton {
+      background: #23823b;
+      color: white;
+    }
+
+    #logoutButton {
+      background: #ddd;
+      color: #222;
+    }
+
+    #message {
+      margin-top: 20px;
+      overflow-wrap: anywhere;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="login-card">
+    <h1>LBS Student Attendance</h1>
+    <p>Staff Login</p>
+
+    <button id="loginButton">Sign in with Google</button>
+    <button id="logoutButton" hidden>Sign out</button>
+
+    <div id="message">Please sign in using your Google account.</div>
+  </div>
+
+  <script type="module">
+    import { initializeApp }
+      from "https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js";
+
+    import {
+      getAuth,
+      GoogleAuthProvider,
+      signInWithPopup,
+      signOut,
+      onAuthStateChanged
+    } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyBmLcBGIBz5w9XURUDfXLdBc72FuWqYiVI",
+      authDomain: "lbs-student-attendance.firebaseapp.com",
+      projectId: "lbs-student-attendance",
+      storageBucket: "lbs-student-attendance.firebasestorage.app",
+      messagingSenderId: "495627316487",
+      appId: "1:495627316487:web:54dd0db6baed4735292a2"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const provider = new GoogleAuthProvider();
+
+    const loginButton = document.getElementById("loginButton");
+    const logoutButton = document.getElementById("logoutButton");
+    const message = document.getElementById("message");
+
+    loginButton.addEventListener("click", async () => {
+      try {
+        message.textContent = "Signing in...";
+
+        await signInWithPopup(auth, provider);
+
+      } catch (error) {
+        message.textContent = "Login error: " + error.message;
+      }
+    });
+
+    logoutButton.addEventListener("click", async () => {
+      try {
+        await signOut(auth);
+      } catch (error) {
+        message.textContent = "Sign-out error: " + error.message;
+      }
+    });
+
+    onAuthStateChanged(auth, (user) => {
+      if (user) {
+        message.innerHTML =
+          "<strong>Google sign-in successful!</strong><br><br>" +
+          "Email: " + user.email;
+
+        loginButton.hidden = true;
+        logoutButton.hidden = false;
+      } else {
+        message.textContent =
+          "Please sign in using your Google account.";
+
+        loginButton.hidden = false;
+        logoutButton.hidden = true;
+      }
+    });
+  </script>
+</body>
+</html>
