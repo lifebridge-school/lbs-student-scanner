@@ -19,11 +19,12 @@
     .login-card {
       background: white;
       width: 90%;
-      max-width: 420px;
+      max-width: 460px;
       padding: 35px 25px;
       border-radius: 16px;
       box-shadow: 0 4px 20px #0002;
       text-align: center;
+      box-sizing: border-box;
     }
 
     h1 { color: #23823b; }
@@ -51,7 +52,18 @@
     #message {
       margin-top: 20px;
       overflow-wrap: anywhere;
+      line-height: 1.7;
     }
+
+    .profile {
+      text-align: left;
+      background: #f3f7f1;
+      border-radius: 10px;
+      padding: 16px;
+      margin-top: 18px;
+    }
+
+    .profile p { margin: 9px 0; }
   </style>
 </head>
 
@@ -63,7 +75,9 @@
     <button id="loginButton">Sign in with Google</button>
     <button id="logoutButton" hidden>Sign out</button>
 
-    <div id="message">Please sign in using your Google account.</div>
+    <div id="message">
+      Please sign in using your Google account.
+    </div>
   </div>
 
   <script type="module">
@@ -78,6 +92,12 @@
       onAuthStateChanged
     } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
 
+    import {
+      getFirestore,
+      doc,
+      getDoc
+    } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
+
     const firebaseConfig = {
       apiKey: "AIzaSyBmLcBGIBz5w9XURUDfXLdBc72FuWqYiVI",
       authDomain: "lbs-student-attendance.firebaseapp.com",
@@ -89,6 +109,7 @@
 
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
+    const db = getFirestore(app);
     const provider = new GoogleAuthProvider();
 
     const loginButton = document.getElementById("loginButton");
@@ -98,9 +119,7 @@
     loginButton.addEventListener("click", async () => {
       try {
         message.textContent = "Signing in...";
-
         await signInWithPopup(auth, provider);
-
       } catch (error) {
         message.textContent = "Login error: " + error.message;
       }
@@ -114,20 +133,65 @@
       }
     });
 
-    onAuthStateChanged(auth, (user) => {
-      if (user) {
-        message.innerHTML =
-          "<strong>Google sign-in successful!</strong><br><br>" +
-          "Email: " + user.email;
+    function addProfileRow(container, label, value) {
+      const p = document.createElement("p");
+      const strong = document.createElement("strong");
+      strong.textContent = label + ": ";
+      p.append(strong, document.createTextNode(value || ""));
+      container.appendChild(p);
+    }
 
-        loginButton.hidden = true;
-        logoutButton.hidden = false;
-      } else {
+    onAuthStateChanged(auth, async (user) => {
+      if (!user) {
         message.textContent =
           "Please sign in using your Google account.";
-
         loginButton.hidden = false;
         logoutButton.hidden = true;
+        return;
+      }
+
+      loginButton.hidden = true;
+      logoutButton.hidden = false;
+      message.textContent = "Checking your school staff profile...";
+
+      try {
+        const staffRef = doc(db, "staff", user.uid);
+        const staffSnapshot = await getDoc(staffRef);
+
+        if (!staffSnapshot.exists()) {
+          message.textContent =
+            "Access denied. Your account is not registered as school staff.";
+          return;
+        }
+
+        const staff = staffSnapshot.data();
+
+        if (staff.status !== "Active") {
+          message.textContent =
+            "Access denied. Your staff account is not active.";
+          return;
+        }
+
+        const profile = document.createElement("div");
+        profile.className = "profile";
+
+        addProfileRow(profile, "Name", staff.name);
+        addProfileRow(profile, "Email", staff.email);
+        addProfileRow(profile, "Role", staff.role);
+        addProfileRow(profile, "Campus", staff.campus);
+        addProfileRow(profile, "Status", staff.status);
+
+        message.replaceChildren();
+
+        const success = document.createElement("h3");
+        success.textContent = "Staff verification successful!";
+        success.style.color = "#23823b";
+
+        message.append(success, profile);
+
+      } catch (error) {
+        message.textContent =
+          "Staff verification failed: " + error.message;
       }
     });
   </script>
