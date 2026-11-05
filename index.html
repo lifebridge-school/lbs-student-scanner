@@ -201,8 +201,14 @@
 
   // FIREBASE IMPORTS
 
-  import { initializeApp }
-    from "https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js";
+ import {
+  getFirestore,
+  doc,
+  getDoc,
+  collection,
+  addDoc,
+  serverTimestamp
+} from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 
   import {
     getAuth,
@@ -555,7 +561,90 @@
 
   // PROCESS SCANNED QR CODE
 
-  async function onScanSuccess(decodedText) {
+ 
+async function onScanSuccess(decodedText) {
+
+  if (processing || !currentStaff || !auth.currentUser) return;
+
+  processing = true;
+
+  try {
+    await scanner.stop();
+  } catch (error) {}
+
+  scanning = false;
+
+  const studentID = decodedText.trim();
+  const studentName = sampleStudents[studentID];
+
+  const location = locationSelect.value;
+  const event = eventSelect.value;
+
+  try {
+
+    // Only accept our five temporary test students
+    if (!studentName) {
+      throw new Error(
+        "Unknown student. This ID is not in our sample database."
+      );
+    }
+
+    // Verify the selected campus
+    if (!allowedLocations.includes(location)) {
+      throw new Error("Invalid scanning location.");
+    }
+
+    // Verify staff campus permission again
+    if (
+      currentStaff.role === "Staff" &&
+      currentStaff.campus !== location
+    ) {
+      throw new Error("You are not authorized to scan at this campus.");
+    }
+
+    // Submit scan to Firestore queue
+    const queueDocument = await addDoc(
+      collection(db, "scanQueue"),
+      {
+        studentId: studentID,
+        event: event,
+        location: location,
+        staffUid: auth.currentUser.uid,
+        createdAt: serverTimestamp()
+      }
+    );
+
+    showResult(
+      "SCAN SUBMITTED SUCCESSFULLY!\n\n" +
+      "Student: " + studentName + "\n" +
+      "Student ID: " + studentID + "\n" +
+      "Action: " + event + "\n" +
+      "Location: " + location + "\n" +
+      "Staff: " + (currentStaff.name || auth.currentUser.email) + "\n" +
+      "Time: " + new Date().toLocaleTimeString() +
+      "\n\nFirestore Queue ID:\n" + queueDocument.id +
+      "\n\nWaiting for Google Sheets processing.\n" +
+      "Attendance is NOT yet confirmed.",
+      "success"
+    );
+
+  } catch (error) {
+
+    showResult(
+      "SCAN SUBMISSION FAILED\n\n" + error.message,
+      "error"
+    );
+
+  } finally {
+
+    stopButton.classList.add("hidden");
+    startButton.disabled = false;
+    nextButton.classList.remove("hidden");
+
+    processing = false;
+  }
+}
+
 
     if (processing || !currentStaff) return;
 
