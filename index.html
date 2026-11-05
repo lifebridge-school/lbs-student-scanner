@@ -31,6 +31,10 @@
       color: #15803d;
     }
 
+    p {
+      line-height: 1.6;
+    }
+
     label {
       display: block;
       margin-top: 18px;
@@ -61,10 +65,15 @@
 
     button:disabled {
       opacity: .5;
+      cursor: not-allowed;
     }
 
     .stop {
       background: #dc2626;
+    }
+
+    .logout {
+      background: #64748b;
     }
 
     #reader {
@@ -72,7 +81,7 @@
       margin-top: 20px;
     }
 
-    #result {
+    #result, #loginMessage {
       margin-top: 20px;
       padding: 16px;
       border-radius: 10px;
@@ -91,25 +100,70 @@
       background: #fee2e2 !important;
       color: #991b1b;
     }
+
+    .profile {
+      background: #f0fdf4;
+      padding: 12px;
+      border-radius: 10px;
+      margin-top: 15px;
+      overflow-wrap: anywhere;
+    }
+
+    .profile p {
+      margin: 7px 0;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    .note {
+      font-size: 13px;
+      color: #64748b;
+      text-align: center;
+    }
   </style>
 </head>
 
 <body>
 
-<div class="container">
+<!-- LOGIN SECTION -->
+<div class="container" id="loginSection">
 
-  <h2> LBS Student Scanner </h2>
+  <h2>LBS Student Attendance</h2>
+
+  <p style="text-align:center">
+    Staff Login
+  </p>
+
+  <button id="loginButton">
+    SIGN IN WITH GOOGLE
+  </button>
+
+  <div id="loginMessage">
+    Please sign in using your registered school Google account.
+  </div>
+
+</div>
+
+
+<!-- SCANNER SECTION -->
+<div class="container hidden" id="scannerSection">
+
+  <h2>LBS Student Scanner</h2>
+
+  <div class="profile" id="staffProfile"></div>
+
+  <button class="logout" id="logoutButton">
+    SIGN OUT
+  </button>
 
   <p style="text-align:center">
     Scan a student ID card to identify the student.
   </p>
 
   <label>Scanning Location</label>
-  <select id="location">
-    <option value="Campus 1A">Campus 1A</option>
-    <option value="Campus 1B">Campus 1B</option>
-    <option value="Campus 2">Campus 2</option>
-  </select>
+  <select id="location"></select>
 
   <label>Attendance Action</label>
   <select id="event">
@@ -117,14 +171,12 @@
     <option value="OUT">CHECK OUT - Departure</option>
   </select>
 
-  <button id="startButton" onclick="startScanner()">
+  <button id="startButton">
     START SCANNING
   </button>
 
   <button id="stopButton"
-          class="stop"
-          onclick="stopScanner()"
-          style="display:none">
+          class="stop hidden">
     STOP SCANNING
   </button>
 
@@ -134,21 +186,94 @@
     Ready to scan a student ID.
   </div>
 
-  <button id="nextButton"
-          onclick="startScanner()"
-          style="display:none">
+  <button id="nextButton" class="hidden">
     SCAN NEXT STUDENT
   </button>
 
+  <p class="note">
+    Testing mode: scans are not yet saved to Google Sheets.
+  </p>
+
 </div>
 
-<script>
 
+<script type="module">
+
+  // FIREBASE IMPORTS
+
+  import { initializeApp }
+    from "https://www.gstatic.com/firebasejs/11.6.0/firebase-app.js";
+
+  import {
+    getAuth,
+    GoogleAuthProvider,
+    signInWithPopup,
+    signOut,
+    onAuthStateChanged
+  } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
+
+  import {
+    getFirestore,
+    doc,
+    getDoc
+  } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
+
+
+  // FIREBASE CONFIGURATION
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyBmLcBGIBz5w9XURUDfXLdBc72FuWqYiVI",
+    authDomain: "lbs-student-attendance.firebaseapp.com",
+    projectId: "lbs-student-attendance",
+    storageBucket: "lbs-student-attendance.firebasestorage.app",
+    messagingSenderId: "495627316487",
+    appId: "1:495627316487:web:54dd0db6baed4735292a2"
+  };
+
+
+  // INITIALIZE FIREBASE
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+  const provider = new GoogleAuthProvider();
+
+
+  // PAGE ELEMENTS
+
+  const loginSection = document.getElementById("loginSection");
+  const scannerSection = document.getElementById("scannerSection");
+
+  const loginButton = document.getElementById("loginButton");
+  const logoutButton = document.getElementById("logoutButton");
+
+  const loginMessage = document.getElementById("loginMessage");
+  const staffProfile = document.getElementById("staffProfile");
+
+  const locationSelect = document.getElementById("location");
+  const eventSelect = document.getElementById("event");
+
+  const startButton = document.getElementById("startButton");
+  const stopButton = document.getElementById("stopButton");
+  const nextButton = document.getElementById("nextButton");
+
+
+  // STAFF AND SCANNER INFORMATION
+
+  let currentStaff = null;
   let scanner = null;
   let scanning = false;
   let processing = false;
 
-  // Temporary sample student database
+  const allowedLocations = [
+    "Campus 1A",
+    "Campus 1B",
+    "Campus 2"
+  ];
+
+
+  // TEMPORARY SAMPLE STUDENTS
+
   const sampleStudents = {
     "TEST001": "Sample Student 1",
     "TEST002": "Sample Student 2",
@@ -157,26 +282,231 @@
     "TEST005": "Sample Student 5"
   };
 
-  function showResult(message, type) {
+
+  // DISPLAY SCAN RESULT
+
+  function showResult(message, type = "") {
     const box = document.getElementById("result");
-    box.className = type || "";
+    box.className = type;
     box.textContent = message;
   }
 
+
+  // DISPLAY STAFF PROFILE
+
+  function displayStaffProfile(user, staff) {
+
+    staffProfile.replaceChildren();
+
+    const details = [
+      ["Name", staff.name || "Not provided"],
+      ["Email", staff.email || user.email || "Not provided"],
+      ["Role", staff.role],
+      ["Campus", staff.campus],
+      ["Status", staff.status]
+    ];
+
+    details.forEach(([label, value]) => {
+
+      const p = document.createElement("p");
+      const strong = document.createElement("strong");
+
+      strong.textContent = label + ": ";
+
+      p.append(strong, document.createTextNode(value || ""));
+
+      staffProfile.appendChild(p);
+    });
+  }
+
+
+  // SET CAMPUS PERMISSIONS
+
+  function setupCampus(user, staff) {
+
+    locationSelect.replaceChildren();
+
+    let locations = [];
+
+    if (staff.role === "Admin") {
+
+      locations = allowedLocations;
+
+      locationSelect.disabled = false;
+
+    } else if (staff.role === "Staff") {
+
+      if (!allowedLocations.includes(staff.campus)) {
+        throw new Error("Your assigned campus is invalid. Please contact the administrator.");
+      }
+
+      locations = [staff.campus];
+
+      locationSelect.disabled = true;
+
+    } else {
+
+      throw new Error("Your staff role is not authorized to use the scanner.");
+    }
+
+    locations.forEach(location => {
+
+      const option = document.createElement("option");
+
+      option.value = location;
+      option.textContent = location;
+
+      locationSelect.appendChild(option);
+    });
+  }
+
+
+  // VERIFY STAFF ACCOUNT
+
+  async function verifyStaff(user) {
+
+    loginMessage.textContent = "Checking your school staff profile...";
+
+    try {
+
+      const staffRef = doc(db, "staff", user.uid);
+      const staffSnapshot = await getDoc(staffRef);
+
+      if (!staffSnapshot.exists()) {
+        throw new Error("Your Google account is not registered as school staff.");
+      }
+
+      const staff = staffSnapshot.data();
+
+      if (staff.status !== "Active") {
+        throw new Error("Your staff account is not active.");
+      }
+
+      if (!["Admin", "Staff"].includes(staff.role)) {
+        throw new Error("Your staff role is not authorized.");
+      }
+
+      setupCampus(user, staff);
+
+      currentStaff = staff;
+
+      displayStaffProfile(user, staff);
+
+      loginSection.classList.add("hidden");
+      scannerSection.classList.remove("hidden");
+
+      showResult("Welcome!\n\nYour staff account has been verified. You can start scanning.");
+
+    } catch (error) {
+
+      currentStaff = null;
+
+      scannerSection.classList.add("hidden");
+      loginSection.classList.remove("hidden");
+
+      loginMessage.className = "error";
+      loginMessage.textContent =
+        "STAFF VERIFICATION FAILED\n\n" + error.message;
+
+      await signOut(auth).catch(() => {});
+    }
+  }
+
+
+  // GOOGLE LOGIN
+
+  loginButton.addEventListener("click", async () => {
+
+    try {
+
+      loginButton.disabled = true;
+      loginMessage.className = "";
+      loginMessage.textContent = "Opening Google sign-in...";
+
+      await signInWithPopup(auth, provider);
+
+    } catch (error) {
+
+      loginMessage.className = "error";
+      loginMessage.textContent =
+        "LOGIN ERROR\n\n" + error.message;
+
+    } finally {
+
+      loginButton.disabled = false;
+    }
+
+  });
+
+
+  // AUTOMATIC LOGIN CHECK
+
+  onAuthStateChanged(auth, async user => {
+
+    if (!user) {
+
+      currentStaff = null;
+
+      loginSection.classList.remove("hidden");
+      scannerSection.classList.add("hidden");
+
+      loginButton.disabled = false;
+
+      loginMessage.className = "";
+      loginMessage.textContent =
+        "Please sign in using your registered school Google account.";
+
+      return;
+    }
+
+    await verifyStaff(user);
+
+  });
+
+
+  // SIGN OUT
+
+  logoutButton.addEventListener("click", async () => {
+
+    if (scanner && scanning) {
+      try {
+        await scanner.stop();
+      } catch (error) {}
+    }
+
+    scanning = false;
+    processing = false;
+    scanner = null;
+    currentStaff = null;
+
+    await signOut(auth);
+
+  });
+
+
+  // START CAMERA SCANNER
+
   async function startScanner() {
+
+    if (!auth.currentUser || !currentStaff) {
+      showResult("Please sign in again.", "error");
+      return;
+    }
 
     if (scanning || processing) return;
 
     if (typeof Html5Qrcode === "undefined") {
+
       showResult(
         "Scanner library failed to load. Check your internet connection.",
         "error"
       );
+
       return;
     }
 
-    document.getElementById("startButton").disabled = true;
-    document.getElementById("nextButton").style.display = "none";
+    startButton.disabled = true;
+    nextButton.classList.add("hidden");
 
     try {
 
@@ -205,7 +535,7 @@
 
       scanning = true;
 
-      document.getElementById("stopButton").style.display = "block";
+      stopButton.classList.remove("hidden");
 
       showResult(
         "Camera is ready!\n\nPlease scan a student QR code."
@@ -218,13 +548,16 @@
         "error"
       );
 
-      document.getElementById("startButton").disabled = false;
+      startButton.disabled = false;
     }
   }
 
+
+  // PROCESS SCANNED QR CODE
+
   async function onScanSuccess(decodedText) {
 
-    if (processing) return;
+    if (processing || !currentStaff) return;
 
     processing = true;
 
@@ -237,8 +570,8 @@
     const studentID = decodedText.trim();
     const studentName = sampleStudents[studentID];
 
-    const location = document.getElementById("location").value;
-    const event = document.getElementById("event").value;
+    const location = locationSelect.value;
+    const event = eventSelect.value;
 
     if (studentName) {
 
@@ -248,8 +581,9 @@
         "Student ID: " + studentID + "\n" +
         "Action: " + event + "\n" +
         "Location: " + location + "\n" +
+        "Staff: " + (currentStaff.name || auth.currentUser.email) + "\n" +
         "Time: " + new Date().toLocaleTimeString() +
-        "\n\nQR scanning is working!",
+        "\n\nQR scanning is working!\n\nTEST MODE: Not saved to Google Sheets.",
         "success"
       );
 
@@ -263,16 +597,20 @@
       );
     }
 
-    document.getElementById("stopButton").style.display = "none";
-    document.getElementById("startButton").disabled = false;
-    document.getElementById("nextButton").style.display = "block";
+    stopButton.classList.add("hidden");
+    startButton.disabled = false;
+    nextButton.classList.remove("hidden");
 
     processing = false;
   }
 
+
+  // STOP CAMERA
+
   async function stopScanner() {
 
     if (scanner && scanning) {
+
       try {
         await scanner.stop();
       } catch (error) {}
@@ -280,11 +618,18 @@
       scanning = false;
     }
 
-    document.getElementById("stopButton").style.display = "none";
-    document.getElementById("startButton").disabled = false;
+    stopButton.classList.add("hidden");
+    startButton.disabled = false;
 
     showResult("Scanning stopped. You can start again.");
   }
+
+
+  // BUTTON EVENTS
+
+  startButton.addEventListener("click", startScanner);
+  nextButton.addEventListener("click", startScanner);
+  stopButton.addEventListener("click", stopScanner);
 
 </script>
 
