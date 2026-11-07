@@ -28,7 +28,7 @@
       margin-top: 18px;
       font-weight: bold;
     }
-    select, button {
+    select, button, input {
       width: 100%;
       padding: 14px;
       margin-top: 9px;
@@ -36,10 +36,24 @@
       font-size: 16px;
       box-sizing: border-box;
     }
-    select {
+    select, input {
       border: 1px solid #cbd5e1;
       background: white;
     }
+    input:focus, select:focus {
+      outline: 2px solid #86efac;
+      border-color: #15803d;
+    }
+    .manual-entry {
+      margin-top: 18px;
+      padding: 14px;
+      border: 1px solid #bbf7d0;
+      border-radius: 10px;
+      background: #f0fdf4;
+    }
+    .manual-entry label { margin-top: 0; }
+    .secondary-button { background: #2563eb; }
+    .hint { font-size: 12px; color: #64748b; margin: 7px 0 0; }
     button {
       border: none;
       color: white;
@@ -95,8 +109,15 @@
   <button class="logout" id="logoutButton">SIGN OUT</button>
 
   <p style="text-align:center">
-    Scan a student ID card to identify the student.
+    Scan a student ID card or enter the Student ID manually.
   </p>
+
+  <div class="manual-entry">
+    <label for="manualStudentId">Student ID (if the student forgets the card)</label>
+    <input id="manualStudentId" type="text" placeholder="Enter Student ID, e.g. TEST001" autocomplete="off" />
+    <button id="manualSubmitButton" class="secondary-button" type="button">SUBMIT STUDENT ID</button>
+    <p class="hint">For the current pilot, only TEST001–TEST005 are enabled.</p>
+  </div>
 
   <label for="location">Scanning Location</label>
   <select id="location"></select>
@@ -114,8 +135,7 @@
   <button id="nextButton" class="hidden">SCAN NEXT STUDENT</button>
 
   <p class="note">
-    Pilot mode: scans are sent to the Firestore queue. Google Sheets
-    attendance is confirmed only after the Apps Script queue processor runs.
+    Pilot mode: submitted scans are processed automatically. Please wait for the school attendance system to finish processing.
   </p>
 </div>
 
@@ -167,6 +187,8 @@
   const startButton = document.getElementById("startButton");
   const stopButton = document.getElementById("stopButton");
   const nextButton = document.getElementById("nextButton");
+  const manualStudentId = document.getElementById("manualStudentId");
+  const manualSubmitButton = document.getElementById("manualSubmitButton");
   const resultBox = document.getElementById("result");
 
   let currentStaff = null;
@@ -367,19 +389,27 @@
     }
   }
 
-  async function onScanSuccess(decodedText) {
+  async function submitStudentAttendance(studentIdValue, source) {
     if (processing || !currentStaff || !auth.currentUser) return;
 
     processing = true;
-    await stopCameraIfRunning();
-    const studentID = String(decodedText).trim();
+    if (source === "manual") {
+      manualSubmitButton.disabled = true;
+    } else {
+      await stopCameraIfRunning();
+    }
+
+    const studentID = String(studentIdValue || "").trim().toUpperCase();
     const studentName = sampleStudents[studentID];
     const location = locationSelect.value;
     const event = eventSelect.value;
 
     try {
+      if (!studentID) {
+        throw new Error("Please enter or scan a Student ID.");
+      }
       if (!studentName) {
-        throw new Error("Unknown student. This ID is not in the five-student pilot list.");
+        throw new Error("Unknown student. This ID is not in the five-student pilot list (TEST001–TEST005).");
       }
       if (!allowedLocations.includes(location)) {
         throw new Error("Invalid scanning location.");
@@ -403,22 +433,40 @@
         "SCAN SUBMITTED SUCCESSFULLY!\n\n" +
         "Student: " + studentName + "\n" +
         "Student ID: " + studentID + "\n" +
+        "Entry method: " + (source === "manual" ? "Manual Student ID" : "QR code") + "\n" +
         "Action: " + event + "\n" +
         "Location: " + location + "\n" +
         "Staff: " + (currentStaff.name || auth.currentUser.email) + "\n" +
         "Time: " + new Date().toLocaleTimeString() +
         "\n\nQueue ID: " + queueDocument.id +
-        "\n\nWaiting for Google Sheets processing.\nAttendance is NOT yet confirmed.",
+        "\n\nYour scan has been submitted. Processing is automatic.",
         "success"
       );
+      manualStudentId.value = "";
     } catch (error) {
       showResult("SCAN SUBMISSION FAILED\n\n" + error.message, "error");
     } finally {
       startButton.disabled = false;
+      manualSubmitButton.disabled = false;
       nextButton.classList.remove("hidden");
       processing = false;
     }
   }
+
+  async function onScanSuccess(decodedText) {
+    await submitStudentAttendance(decodedText, "qr");
+  }
+
+  manualSubmitButton.addEventListener("click", async () => {
+    await submitStudentAttendance(manualStudentId.value, "manual");
+  });
+
+  manualStudentId.addEventListener("keydown", async event => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      await submitStudentAttendance(manualStudentId.value, "manual");
+    }
+  });
 
   async function stopScanner() {
     await stopCameraIfRunning();
