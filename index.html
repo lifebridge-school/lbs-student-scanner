@@ -135,7 +135,7 @@
   <button id="nextButton" class="hidden">SCAN NEXT STUDENT</button>
 
   <p class="note">
-    Pilot mode: submitted scans are processed automatically. Please wait for the school attendance system to finish processing.
+    Attendance and guardian notification results update automatically after processing.
   </p>
 </div>
 
@@ -158,7 +158,8 @@
     getDoc,
     collection,
     addDoc,
-    serverTimestamp
+    serverTimestamp,
+    onSnapshot
   } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore.js";
 
   const firebaseConfig = {
@@ -196,6 +197,7 @@
   let scanning = false;
   let processing = false;
   let authCheckInProgress = false;
+  let scanResultUnsubscribe = null;
 
   const allowedLocations = ["Campus 1A", "Campus 1B", "Campus 2"];
 
@@ -340,6 +342,10 @@
 
   logoutButton.addEventListener("click", async () => {
     await stopCameraIfRunning();
+    if (scanResultUnsubscribe) {
+      scanResultUnsubscribe();
+      scanResultUnsubscribe = null;
+    }
     processing = false;
     currentStaff = null;
     try {
@@ -389,6 +395,73 @@
     }
   }
 
+  function watchScanResult(scanId, submittedDetails) {
+    if (scanResultUnsubscribe) {
+      scanResultUnsubscribe();
+      scanResultUnsubscribe = null;
+    }
+
+    showResult(
+      "SCAN SUBMITTED SUCCESSFULLY!\n\n" +
+      "Student: " + submittedDetails.studentName + "\n" +
+      "Student ID: " + submittedDetails.studentId + "\n" +
+      "Entry method: " + submittedDetails.entryMethod + "\n" +
+      "Action: " + submittedDetails.event + "\n" +
+      "Location: " + submittedDetails.location + "\n" +
+      "Staff: " + submittedDetails.staffName + "\n\n" +
+      "Attendance: Waiting for processing\n" +
+      "Guardian notification: Waiting for processing\n\n" +
+      "Your scan has been submitted. The result will update automatically.",
+      "success"
+    );
+
+    scanResultUnsubscribe = onSnapshot(
+      doc(db, "scanResults", scanId),
+      snapshot => {
+        if (!snapshot.exists()) return;
+        const result = snapshot.data();
+        const attendance = result.attendanceStatus || "Unknown";
+        const notification = result.notificationStatus || "Unknown";
+        const isSaved = attendance === "Saved";
+        const notificationLine = notification === "Sent"
+          ? "Guardian notification: TELEGRAM SENT"
+          : notification === "No connected guardian"
+            ? "Guardian notification: NO CONNECTED GUARDIAN"
+            : notification === "Partially sent"
+              ? "Guardian notification: PARTIALLY SENT"
+              : notification === "Failed"
+                ? "Guardian notification: FAILED"
+                : "Guardian notification: " + notification.toUpperCase();
+
+        showResult(
+          "SCAN PROCESSING RESULT\n\n" +
+          "Student: " + (result.studentName || submittedDetails.studentName) + "\n" +
+          "Student ID: " + (result.studentId || submittedDetails.studentId) + "\n" +
+          "Action: " + (result.event || submittedDetails.event) + "\n" +
+          "Location: " + (result.location || submittedDetails.location) + "\n\n" +
+          "Attendance: " + (isSaved ? "SAVED IN GOOGLE SHEETS" : attendance.toUpperCase()) + "\n" +
+          notificationLine,
+          isSaved && notification === "Sent" ? "success" : (isSaved ? "success" : "error")
+        );
+
+        if (isSaved && ["Sent", "No connected guardian", "Partially sent", "Failed"].includes(notification)) {
+          if (scanResultUnsubscribe) {
+            scanResultUnsubscribe();
+            scanResultUnsubscribe = null;
+          }
+        }
+      },
+      error => {
+        showResult(
+          "SCAN SUBMITTED SUCCESSFULLY!\n\n" +
+          "Your scan is being processed automatically.\n" +
+          "The live result is temporarily unavailable. Please check with the school office.",
+          "success"
+        );
+      }
+    );
+  }
+
   async function submitStudentAttendance(studentIdValue, source) {
     if (processing || !currentStaff || !auth.currentUser) return;
 
@@ -429,19 +502,14 @@
         createdAt: serverTimestamp()
       });
 
-      showResult(
-        "SCAN SUBMITTED SUCCESSFULLY!\n\n" +
-        "Student: " + studentName + "\n" +
-        "Student ID: " + studentID + "\n" +
-        "Entry method: " + (source === "manual" ? "Manual Student ID" : "QR code") + "\n" +
-        "Action: " + event + "\n" +
-        "Location: " + location + "\n" +
-        "Staff: " + (currentStaff.name || auth.currentUser.email) + "\n" +
-        "Time: " + new Date().toLocaleTimeString() +
-        "\n\nQueue ID: " + queueDocument.id +
-        "\n\nYour scan has been submitted. Processing is automatic.",
-        "success"
-      );
+      watchScanResult(queueDocument.id, {
+        studentName: studentName,
+        studentId: studentID,
+        entryMethod: source === "manual" ? "Manual Student ID" : "QR code",
+        event: event,
+        location: location,
+        staffName: currentStaff.name || auth.currentUser.email
+      });
       manualStudentId.value = "";
     } catch (error) {
       showResult("SCAN SUBMISSION FAILED\n\n" + error.message, "error");
